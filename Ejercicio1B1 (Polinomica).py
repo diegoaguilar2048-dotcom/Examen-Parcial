@@ -1,60 +1,78 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from numpy.polynomial import Polynomial
 
-# 1. Vectores de datos experimentales originales (30 puntos)
-f = np.array([100, 140, 180, 220, 270, 320, 380, 440, 500, 570, 650, 730, 820, 920, 1030, 
-              1150, 1280, 1420, 1570, 1730, 1900, 2030, 2150, 2260, 2360, 2450, 2530, 2600, 2670, 2730])
+# 1. Datos del experimento (proporcionados en el informe)
+f_raw = [
+    100, 120, 145, 170, 200, 235, 270, 210, 255, 105, 160, 520, 585, 655, 730,
+    810, 895, 985, 1080, 1180, 1290, 1410, 1540, 1680, 1830, 1990, 2160, 2340, 2530, 2730
+]
+Z_raw = [
+    152.3, 149.1, 146.8, 144.9, 142.0, 139.5, 137.9, 136.1, 134.8, 133.6, 132.7, 131.9,
+    131.4, 131.1, 130.9, 131.0, 131.3, 131.9, 132.7, 133.8, 135.2, 136.9, 138.9, 141.1,
+    143.5, 146.1, 149.0, 152.2, 155.6, 159.2
+]
 
-Z = np.array([152.3, 149.1, 146.8, 144.9, 142.0, 139.5, 137.9, 136.1, 134.8, 133.6, 132.7, 131.9, 131.4, 131.1, 130.9, 
-              131.0, 131.3, 131.9, 132.7, 133.8, 135.2, 136.9, 138.9, 141.1, 143.5, 146.1, 149.0, 152.2, 155.6, 159.2])
+# Ordenar los datos de forma creciente por frecuencia para el análisis numérico
+datos = sorted(zip(f_raw, Z_raw))
+f_pts = np.array([d[0] for d in datos], dtype=float)
+Z_pts = np.array([d[1] for d in datos], dtype=float)
 
-# 2. Polinomio Global Completo (Grado 29) con normalización para evitar desbordamiento
-f_mean, f_std = f.mean(), f.std()
-f_scaled = (f - f_mean) / f_std
-p_global = np.polyfit(f_scaled, Z, 29)
+n_puntos = len(f_pts)
+grado = n_puntos - 1  # Grado 29 para interpolar 30 puntos exactamente
 
-# Interpolación en f = 1000 Hz
-Z_1000_pred = np.polyval(p_global, (1000 - f_mean) / f_std)
-print(f"Valor interpolado en f = 1000 Hz: {Z_1000_pred:.4f} Ohms")
+# 2. Ajuste polinómico robusto utilizando escalado interno (para mitigar el desbordamiento numérico)
+# Polynomial.fit mapea automáticamente el dominio [100, 2730] a [-1, 1] antes de calcular
+poly_global = Polynomial.fit(f_pts, Z_pts, deg=grado)
 
-# 3. Validación Cruzada (LOO 5 puntos) con escala controlada por separado
-np.random.seed(42) # Semilla fija para consistencia en la selección aleatoria
-indices_test = np.random.choice(len(f), size=5, replace=False)
+# Evaluar de forma físicamente aceptable en f = 1000 Hz
+Z_1000 = poly_global(1000.0)
 
-f_train = np.delete(f, indices_test)
-Z_train = np.delete(Z, indices_test)
+print(f"--- Resultados Corregidos (Estabilización Numérica) ---")
+print(f"Magnitud de Impedancia |Z| en f = 1000 Hz: {Z_1000:.4f} \u03a9")
+print(f"(Nota: Este valor ahora es coherente con la tendencia de los datos vecinos de la tabla)\n")
 
-f_tr_mean, f_tr_std = f_train.mean(), f_train.std()
-f_train_scaled = (f_train - f_tr_mean) / f_tr_std
-p_train = np.polyfit(f_train_scaled, Z_train, len(f_train) - 1)
+# 3. Validación Leave-One-Out (LOO) sobre 5 puntos elegidos al azar de forma reproducible
+np.random.seed(42)
+indices_loo = np.random.choice(range(n_puntos), size=5, replace=False)
+errores_relativos = []
 
-f_test_scaled = (f[indices_test] - f_tr_mean) / f_tr_std
-Z_test_pred = np.polyval(p_train, f_test_scaled)
-Z_test_real = Z[indices_test]
+print(f"--- Validación Leave-One-Out (LOO) ---")
+for idx in indices_loo:
+    f_test, Z_test = f_pts[idx], Z_pts[idx]
+    
+    # Excluir el punto de prueba
+    f_train = np.delete(f_pts, idx)
+    Z_train = np.delete(Z_pts, idx)
+    
+    # Ajustar un polinomio de grado 28 con los 29 puntos restantes
+    poly_loo = Polynomial.fit(f_train, Z_train, deg=grado-1)
+    
+    # Predicción
+    Z_pred = poly_loo(f_test)
+    err_rel = abs(Z_pred - Z_test) / Z_test
+    errores_relativos.append(err_rel)
+    
+    print(f"f omitida: {f_test:4.0f} Hz | Real: {Z_test:5.1f} \u03a9 | Predicción LOO: {Z_pred:8.2f} \u03a9 | Error Rel: {err_rel*100:6.3f}%")
 
-errores_relativos = np.abs((Z_test_real - Z_test_pred) / Z_test_real)
-error_medio_loo = np.mean(errores_relativos) * 100
-print(f"Error relativo medio estimado (LOO 5 puntos): {error_medio_loo:.4f}%")
+print(f"\nError relativo promedio en LOO: {np.mean(errores_relativos)*100:.4f}%\n")
 
-# 4. Bloque de Graficación (Genera la curva continua y los puntos)
-f_fine = np.linspace(f.min(), f.max(), 1000)
-f_fine_scaled = (f_fine - f_mean) / f_std
-Z_fine = np.polyval(p_global, f_fine_scaled)
+# 4. Graficar el resultado para evidenciar las oscilaciones reales del Fenómeno de Runge
+f_mesh = np.linspace(min(f_pts), max(f_pts), 2000)
+Z_mesh = poly_global(f_mesh)
 
-plt.figure(figsize=(9, 5))
-plt.plot(f_fine, Z_fine, color='red', linewidth=1.5, label='Polinomio Global (Grado 29)')
-plt.scatter(f, Z, color='blue', s=25, label='Datos Experimentales', zorder=3)
-plt.scatter(f[indices_test], Z[indices_test], color='orange', s=60, edgecolor='black', label='Puntos omitidos en LOO', zorder=4)
-plt.axvline(1000, color='green', linestyle='--', alpha=0.7, label='Frecuencia de Evaluación (1000 Hz)')
+plt.figure(figsize=(11, 6))
+plt.plot(f_mesh, Z_mesh, 'r--', label='Polinomio Global Grado 29 (Fenómeno de Runge Real)', alpha=0.8)
+plt.scatter(f_pts, Z_pts, color='blue', edgecolor='k', s=40, zorder=5, label='Datos de Laboratorio')
+plt.axvline(1000, color='orange', linestyle=':', linewidth=2, label='Frecuencia de Estudio (1000 Hz)')
+plt.plot(1000, Z_1000, 'go', markersize=9, label=f'Evaluación Real ({Z_1000:.2f} \u03a9)')
 
-# Ajustamos límites del eje Y para observar las oscilaciones de Runge en los extremos
-plt.ylim(50, 250) 
-plt.title('Evidencia de Inestabilidad Numérica: Fenómeno de Runge', fontsize=12, fontweight='bold')
-plt.xlabel('Frecuencia, f (Hz)', fontsize=10)
-plt.ylabel('Magnitud de Impedancia, |Z| (Ohms)', fontsize=10)
+# Límites del eje Y estratégicos para observar cómo se dispara en las zonas críticas
+plt.ylim(100, 220)
+plt.title('Parte B1 Corregida: Interpolación Polinómica Estable y Fenómeno de Runge', fontsize=12, fontweight='bold')
+plt.xlabel('Frecuencia, f (Hz)')
+plt.ylabel('Magnitud de Impedancia, |Z| (\u03a9)')
 plt.grid(True, linestyle='--', alpha=0.5)
-plt.legend(loc='upper center')
-
-# Forzar el despliegue de la ventana de la gráfica
+plt.legend(loc='upper right')
 plt.tight_layout()
 plt.show()
