@@ -1,48 +1,65 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import CubicSpline
+from numpy.polynomial import Polynomial
 
-# 1. Datos experimentales originales (30 puntos)
-f = np.array([100, 190, 280, 370, 460, 550, 640, 730, 820, 910, 1000, 1090, 1180, 1270, 1360, 
-              1450, 1540, 1630, 1720, 1810, 1900, 1990, 2080, 2170, 2260, 2350, 2440, 2530, 2620, 2730])
+# 1. Datos del experimento (proporcionados en el informe)
+f_raw = [
+    100, 120, 145, 170, 200, 235, 270, 210, 255, 105, 160, 520, 585, 655, 730,
+    810, 895, 985, 1080, 1180, 1290, 1410, 1540, 1680, 1830, 1990, 2160, 2340, 2530, 2730
+]
+Z_raw = [
+    152.3, 149.1, 146.8, 144.9, 142.0, 139.5, 137.9, 136.1, 134.8, 133.6, 132.7, 131.9,
+    131.4, 131.1, 130.9, 131.0, 131.3, 131.9, 132.7, 133.8, 135.2, 136.9, 138.9, 141.1,
+    143.5, 146.1, 149.0, 152.2, 155.6, 159.2
+]
 
-Z = np.array([152.3, 149.1, 146.8, 144.9, 142.0, 139.5, 137.9, 136.1, 134.8, 133.6, 132.7, 131.9, 131.4, 131.1, 130.9, 
-              131.0, 131.3, 131.9, 132.7, 133.8, 135.2, 136.9, 138.9, 141.1, 143.5, 146.1, 149.0, 152.2, 155.6, 159.2])
+# Ordenar los datos de forma creciente por frecuencia
+datos = sorted(zip(f_raw, Z_raw))
+f_pts = np.array([d[0] for d in datos], dtype=float)
+Z_pts = np.array([d[1] for d in datos], dtype=float)
 
-# 2. RESOLUCIÓN DE LA PARTE B2: Spline Cúbico Natural
-# bc_type='natural' impone de forma exacta que la segunda derivada en las fronteras exteriores sea cero.
-cs_natural = CubicSpline(f, Z, bc_type='natural')
+# 2. Construcción del Spline Cúbico Natural
+# bc_type='natural' impone que la segunda derivada en los extremos sea cero: S''(x0) = S''(xn) = 0
+spline_natural = CubicSpline(f_pts, Z_pts, bc_type='natural')
 
-# Calcular el valor exacto interpolado por el Spline a f = 1000 Hz
-Z_1000_spline = cs_natural(1000)
-print(f"--- MÉTODOS NUMÉRICOS COMPULSAR ---")
-print(f"Valor interpolado por Spline Cúbico en f = 1000 Hz: {Z_1000_spline:.4f} Ohms")
+# 3. Reajuste del Polinomio Global de Grado 29 (para la comparación visual)
+poly_global = Polynomial.fit(f_pts, Z_pts, deg=len(f_pts)-1)
 
-# 3. Datos de control del problema anterior (Polinomio de grado 29 estabilizado)
-f_mean, f_std = f.mean(), f.std()
-f_scaled = (f - f_mean) / f_std
-p_global = np.polyfit(f_scaled, Z, 29)
-Z_1000_poly = np.polyval(p_global, (1000 - f_mean) / f_std)
-print(f"Valor interpolado por Polinomio Grado 29 en f = 1000 Hz: {Z_1000_poly:.4f} Ohms")
+# 4. Evaluaciones en la Frecuencia Bajo Estudio (f = 1000 Hz)
+Z_spline_1000 = spline_natural(1000.0)
+Z_poly_1000 = poly_global(1000.0)
 
-# 4. Generación de la Malla Fina solicitada en la guía
-f_fine = np.linspace(f.min(), f.max(), 1000)
-Z_spline_fine = cs_natural(f_fine)
-Z_poly_fine = np.polyval(p_global, (f_fine - f_mean) / f_std)
+print(f"--- Comparativa de Interpolación en f = 1000 Hz ---")
+print(f"Spline Cúbico Natural:       {Z_spline_1000:.4f} \u03a9")
+print(f"Polinomio Global (Grado 29): {Z_poly_1000:.4f} \u03a9")
+print(f"Diferencia absoluta:         {abs(Z_spline_1000 - Z_poly_1000):.6f} \u03a9\n")
 
-# 5. Despliegue Gráfico Comparativo
-plt.figure(figsize=(9, 5))
-plt.plot(f_fine, Z_spline_fine, color='green', linewidth=2.0, label='Spline Cúbico Natural (Suave/Estable)')
-plt.plot(f_fine, Z_poly_fine, color='red', linestyle='--', linewidth=1.2, label='Polinomio Global Grado 29 (Runge)')
-plt.scatter(f, Z, color='blue', s=30, label='Datos de Laboratorio', zorder=5)
-plt.axvline(1000, color='darkorange', linestyle=':', linewidth=1.5, label='Frecuencia bajo estudio (1000 Hz)')
+# 5. Generación de la Malla Fina y Gráfico Comparativo
+f_mesh = np.linspace(min(f_pts), max(f_pts), 2000)
+Z_mesh_spline = spline_natural(f_mesh)
+Z_mesh_poly = poly_global(f_mesh)
 
-# Ajustamos límites de visibilidad para notar el acople exacto
+plt.figure(figsize=(11, 6))
+
+# Trazado de las curvas de interpolación
+plt.plot(f_mesh, Z_mesh_spline, 'g-', linewidth=2.5, label='Spline Cúbico Natural (Suave/Estable)')
+plt.plot(f_mesh, Z_mesh_poly, 'r--', linewidth=1.2, label='Polinomio Global Grado 29 (Runge)')
+
+# Puntos de datos de laboratorio
+plt.scatter(f_pts, Z_pts, color='blue', edgecolor='b', s=35, zorder=5, label='Datos de Laboratorio')
+
+# Marcadores para la frecuencia de estudio (1000 Hz)
+plt.axvline(1000, color='orange', linestyle=':', linewidth=1.8, label='Frecuencia bajo estudio (1000 Hz)')
+plt.plot(1000, Z_spline_1000, 'mo', markersize=8, zorder=6, label=f'Evaluación Spline ({Z_spline_1000:.4f} \u03a9)')
+
+# Configuración estética idéntica a los requerimientos del informe
 plt.ylim(120, 175)
 plt.title('Validación de Modelos: Espectro de Impedancia Bioeléctrica', fontsize=12, fontweight='bold')
-plt.xlabel('Frecuencia, f (Hz)', fontsize=10)
-plt.ylabel('Magnitud de Impedancia, |Z| (Ohms)', fontsize=10)
-plt.grid(True, linestyle='--', alpha=0.5)
-plt.legend(loc='upper right')
+plt.xlabel('Frecuencia, f (Hz)')
+plt.ylabel('Magnitud de Impedancia, |Z| (Ohms)')
+plt.grid(True, linestyle='--', alpha=0.3)
+plt.legend(loc='upper right', frameon=True)
 plt.tight_layout()
+
 plt.show()
